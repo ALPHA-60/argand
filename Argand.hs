@@ -1,25 +1,14 @@
 module Argand where
 import Core
+
 import Data.Map (Map, empty, insert, (!))
 import Control.Monad.State
 import Data.Maybe (catMaybes)
-import Data.List (intersect, nub, sum, partition, maximumBy, find, nubBy)
-import System.Environment ( getArgs )
+import Data.List (find)
+import System.Environment (getArgs)
+import LinComb
 import qualified Parser
 import qualified Lexer
-
-
--- We reference variables by their ID ("pointer")
-type VarId = Int
-
-data VarType = Real
-             | Imag
-             deriving (Eq, Ord, Show)
-
-data VarMapKey = VarMapKey {
-  keyId :: VarId,
-  keyType :: VarType
-  } deriving (Eq, Ord, Show)
 
 
 dtor x = x * (pi/ 180)
@@ -76,41 +65,8 @@ data PutNode = PutNode {
 
 putStmtToPutNode (PutStmt n b) = PutNode {name = n, box = b}
 
-
-data DepTerm = DepTerm {
-  depVarId :: Maybe Var,
-  coeff :: Float
-} deriving Show
-
-type DepList = [DepTerm]
-
-infixl 6 |+|, |-|
-infixl 7 |*|
-
-depListA |-| depListB =
-  depListA |+| ((-1.0) |*| depListB)
-
-depListA |+| depListB =
-  let depGroups = groupByVar (depListA ++ depListB)
-      depSum = [x | x <- map sumCoeffs depGroups, abs (coeff x) > epsilon]
-  in
-   if null depSum then [zero] else depSum
-  where
-    sumCoeffs = foldr1 (\d1 d2 -> d1 { coeff = coeff d1 + coeff d2 })
-    groupByVar dl = map (\x -> [e | e <- dl, hasSameVar e x]) (nubBy hasSameVar dl)
-    hasSameVar x y = (depVarId x) == (depVarId y)
-    zero = DepTerm {depVarId = Nothing, coeff = 0.0}
-
-
-scalar |*| depList =
-    map (\x -> x {coeff = coeff x * scalar} ) depList
-
-type CplxVarId = Int
-data Var = Var CplxVarId VarType
-         deriving (Show, Eq, Ord)
-
 data NoadState = NoadState {
-  varMap :: Map Var DepList,
+  varMap :: Map Var LinComb,
   maxVarID :: Int,
   depVarList :: [Var],
   nlFail :: Bool,
@@ -172,11 +128,8 @@ makeNoadTree figure putNode = do
     makeFreshVar varType = do
       s <- get
       let nextCplxVarId = maxVarID s
-      let depList = [DepTerm {
-                        depVarId = Just (Var nextCplxVarId varType),
-                        coeff = 1.0
-                        }]
-      put s {varMap = insert (Var nextCplxVarId varType) depList (varMap s) }
+      let newComb = mkLinComb (Var nextCplxVarId varType) 1.0
+      put s {varMap = insert (Var nextCplxVarId varType) newComb (varMap s) }
     incrCplxVarCount = do
       s <- get
       put s{maxVarID = maxVarID s + 1}
@@ -190,9 +143,9 @@ initState = NoadState {
   }
 
 data DepPair = DepPair {
-  rePart :: DepList,
-  imPart :: DepList
-  } deriving Show
+  rePart :: LinComb,
+  imPart :: LinComb
+  }
 
 varFind name [] =
   return $ mkConst 0.0
@@ -225,15 +178,11 @@ pathFind (n:names) npath@(currNoad:ancestry) =
     Just noad ->
       pathFind names (noad:npath)
 
-epsilon = 0.0001
-
 isKnown dp =
-  case (rePart dp, imPart dp) of
-    ([DepTerm {depVarId=Nothing}], [DepTerm {depVarId=Nothing}]) -> True
-    _ -> False
+  isKnownComb (rePart dp) && isKnownComb (imPart dp)
 
-knownRe = coeff . head . rePart
-knownIm = coeff . head . imPart
+knownRe = getValue . rePart
+knownIm = getValue . imPart
 
 mkDep (re, im) =
   DepPair {
@@ -241,8 +190,7 @@ mkDep (re, im) =
     imPart = im
     }
 
-constant c = DepTerm {depVarId = Nothing, coeff = c}
-mkConst c = mkDep ([constant c], [constant 0.0])
+mkConst c = mkDep (mkConstComb c, mkConstComb 0.0)
 
 evalExpr expr noadTrail =
   eval expr where
@@ -301,8 +249,8 @@ evalExpr expr noadTrail =
             "cis" -> do
               x <- eval (head exprs)
               if isKnown x
-                then return $ mkDep ([constant (cos (dtor (knownRe x)))],
-                                     [constant (sin (dtor (knownRe x)))])
+                then return $ mkDep (mkConstComb (cos (dtor (knownRe x))),
+                                     mkConstComb (sin (dtor (knownRe x))))
                 else
                 do
                   raiseNlFlag
@@ -319,13 +267,6 @@ evalExpr expr noadTrail =
 
         _ -> error "Don't know how to handle this"
 
--- substitutes every a*x term in 'to' linear combination with
--- a*from
-depSubst x from to =
-  let (xTerms, nonXterms) = partition (\t -> depVarId t == Just x) to
-      replacements = map (\t -> (coeff t) |*| from) xTerms
-  in
-   foldr (|+|) nonXterms replacements
 
 eqnEval figure noadTrail =
   let currNoad = head noadTrail
@@ -403,28 +344,24 @@ nlDo toSolve haveChance failures = do
             _ <- mapM (\(eqn, noadtree) -> rEqnEval eqn noadtree) failures
             return ()
 
-eqnDo [DepTerm {depVarId = Nothing}] = do
-  return ()
 
-eqnDo linComb = do
-  let term = getMaxCoeffTerm linComb
-      Just dv = depVarId term
-      maxCoeff = coeff term
-  var <- getVar dv
-  let linComb' = (var |-| (1.0/maxCoeff) |*| linComb)
-  setVar dv linComb'
-  s <- get
-  forM_ (depVarList s) (substInto dv linComb')
-  addToDepList dv
-  where getMaxCoeffTerm lc =
-          let nonConsts = [x | x <- lc, depVarId x /= Nothing] in
-          maximumBy (\x y -> compare (abs (coeff x)) (abs (coeff y))) nonConsts
-        substInto srcVar lc var = do
-          lcv <- getVar var
-          setVar var (depSubst srcVar lc lcv)
-        addToDepList var = do
-          s <- get
-          put s {depVarList = (var:(depVarList s))}
+eqnDo linComb
+  | isKnownComb linComb = return ()
+  | otherwise = do
+    let (dv, maxCoeff) = maxTermVarAndCoeff linComb
+    var <- getVar dv
+    let linComb' = (var |-| (1.0/maxCoeff) |*| linComb)
+    setVar dv linComb'
+    s <- get
+    forM_ (depVarList s) (substInto dv linComb')
+    addToDepList dv
+  where
+    substInto srcVar lc var = do
+      lcv <- getVar var
+      setVar var (depSubst srcVar lc lcv)
+    addToDepList var = do
+      s <- get
+      put s {depVarList = (var:(depVarList s))}
 
 
 data Shape =
@@ -459,9 +396,9 @@ evalPenStmt figure noadpath (PenStmt (startExpr:endExpr:_) nExpr (BoxDef name st
   startE  <- evalExpr startExpr noadpath
   endE <- evalExpr endExpr noadpath
   nE <- evalExpr nExpr noadpath
-  let numSteps = round $ realCoeff nE
-      (realStart, realEnd) = (realCoeff startE, realCoeff endE)
-      (imagStart, imagEnd) = (imagCoeff startE, imagCoeff endE)
+  let numSteps = round $ knownRe nE
+      (realStart, realEnd) = (knownRe startE, knownRe endE)
+      (imagStart, imagEnd) = (knownIm startE, knownIm endE)
   -- XXX: wrong!
       realStep = (realEnd - realStart) / (fromIntegral numSteps)
       imagStep = (imagEnd - imagStart) / (fromIntegral numSteps)
@@ -481,9 +418,7 @@ evalPenStmt figure noadpath (PenStmt (startExpr:endExpr:_) nExpr (BoxDef name st
   _ <- mapM (\n -> eqnEval figure (n:noadpath)) noads
   l <- mapM (\n -> collectShapes figure (n:noadpath)) noads
   return (concat l)
-  where realCoeff = coeff . head . rePart
-        imagCoeff = coeff . head . imPart
-        equate expr (re, im) =
+  where equate expr (re, im) =
           EqnStmt (EqnNode
                    (EqnLeaf expr)
                    (EqnLeaf (Comma (Const re) (Const im)))

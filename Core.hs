@@ -49,3 +49,15 @@ data Expr = Const Float
 
 type Name = String
 type VarName = String
+
+data VarType = Real
+             | Imag
+             deriving (Eq, Ord, Show)
+
+type CplxVarId = Int
+
+data Var = Var CplxVarId VarType
+         deriving (Show, Eq, Ord)
+
+epsilon :: Float
+epsilon = 0.0001
