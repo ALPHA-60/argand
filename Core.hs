@@ -8,7 +8,7 @@ data BoxDef =
   BoxDef {
     boxName :: String,
     boxStmts :: Statements
-    } deriving Show
+    }
 
 type Statements = [Stmt]
 
@@ -21,18 +21,15 @@ data Stmt =
   | PenStmt [Expr] Expr BoxDef Expr Expr
   | DrawStmt Name
   | StrStmt StrJust String Expr
-  deriving Show
 
 data StrJust =
   JustLeft
   | JustRight
   | JustCenter
-  deriving Show
 
 data EqnTree =
   EqnLeaf Expr
   | EqnNode EqnTree EqnTree Bool
-  deriving Show
 
 data Expr = Const Float
           | Neg Expr
@@ -45,19 +42,35 @@ data Expr = Const Float
           | Bracket Expr Expr Expr
           | Path [Name]
           | App Name [Expr]
-          deriving Show
 
 type Name = String
 type VarName = String
 
 data VarType = Real
              | Imag
-             deriving (Eq, Ord, Show)
+             deriving (Eq, Ord)
 
 type CplxVarId = Int
 
 data Var = Var CplxVarId VarType
-         deriving (Show, Eq, Ord)
+         deriving (Eq, Ord)
 
 epsilon :: Float
 epsilon = 0.0001
+
+
+onlyVarStmts :: Statements -> Statements
+onlyVarStmts s = [x | x@(VarStmt _) <- s]
+
+onlyEqnStmts :: Statements -> Statements
+onlyEqnStmts s = [x | x@(EqnStmt _) <- s]
+
+onlyPutStmts :: Statements -> Statements
+onlyPutStmts s = [x | x@(PutStmt _ _) <- s]
+
+
+onlyPenStmts :: Statements -> Statements
+onlyPenStmts s = [x | x@(PenStmt _ _ _ _ _) <- s]
+
+onlyConnStmts :: Statements -> Statements
+onlyConnStmts s = [x | x@(ConnStmt _) <- s]

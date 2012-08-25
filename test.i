@@ -8,6 +8,14 @@ box line {
         conn x to y;
 }
 
+box parent {
+  var x;
+  put child : null {
+    var y;
+    conn x to y;
+  }
+}
+
 box main {
         var s, x, y, z;
         s = (3,1);
@@ -17,7 +25,18 @@ box main {
         conn s to s + x;
         conn s to s + y;
         conn s to s + z;
-        
+
+	put parent {
+	  x = L1.y;
+	  child.y = x + (0.1,1);
+	  put null {
+	    var xn,yn;
+	    xn = x;
+	    yn = xn + (2,0.1);
+	    conn xn to yn;
+	  }
+	}
+
         L1.x = s + y;
         L1.y = s + z;
 

@@ -1,6 +1,6 @@
 BIN=argand
 
-$(BIN):  Argand.hs Parser.hs Lexer.hs LinComb.hs
+$(BIN):  Argand.hs Parser.hs Lexer.hs LinComb.hs Core.hs
 	ghc -main-is Argand.main -XBangPatterns -o $@ $<
 
 Parser.hs: Parser.y

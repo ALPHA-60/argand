@@ -23,45 +23,19 @@ data NoadTree = Noad {
   defNode :: PutNode,
   boxVars ::  [VarRef],
   edgeVars ::  [VarRef],
-  boxChildren :: [NoadTree],
-  putChildren :: [NoadTree]
-  } deriving Show
+  children :: [NoadTree]
+  }
 
 type NoadPath = [NoadTree]
-
-justVarStmts  :: Statements -> [Stmt]
-justVarStmts l =
-  case l of
-    [] -> []
-    (VarStmt vs):tail -> (VarStmt vs) : justVarStmts tail
-    (_ : tail) -> justVarStmts tail
 
 justConnStmts :: Statements -> [Stmt]
 justConnStmts stmts =
   [ s | s <- stmts, case s of ConnStmt _ -> True; _ -> False ]
 
-justPenStmts stmts =
-  [ s | s <- stmts, case s of PenStmt _ _ _ _ _ -> True; _ -> False ]
-
-justPutStmts  :: Statements -> [Stmt]
-justPutStmts l =
-  case l of
-    [] -> []
-    x@(PutStmt _ _):tail -> x : justPutStmts tail
-    (_ : tail) -> justPutStmts tail
-
-justEqnStmts  :: Statements -> [Stmt]
-justEqnStmts l =
-  case l of
-    [] -> []
-    x@(EqnStmt _ ):tail -> x : justEqnStmts tail
-    (_ : tail) -> justEqnStmts tail
-
-
 data PutNode = PutNode {
   name :: Maybe Name,
   box  :: BoxDef
-  } deriving Show
+  }
 
 putStmtToPutNode (PutStmt n b) = PutNode {name = n, box = b}
 
@@ -94,7 +68,7 @@ resetNlFlag = do
 data VarRef = VarRef{
   refName :: Name,
   refId :: Int
-} deriving Show
+}
 
 varNames (VarStmt v) = v
 
@@ -112,12 +86,11 @@ makeNoadTree figure putNode = do
              defNode = putNode,
              boxVars = bv,
              edgeVars = ev,
-             boxChildren = bc,
-             putChildren =  pc
+             children = pc ++ bc
          })
   where
-    declaredVars stmts = concatMap varNames (justVarStmts stmts)
-    putNodes stmts = map putStmtToPutNode (justPutStmts stmts)
+    declaredVars stmts = concatMap varNames (onlyVarStmts stmts)
+    putNodes stmts = map putStmtToPutNode (onlyPutStmts stmts)
     allocNewVar name = do
       s <- get
       let  varRef = VarRef {refName = name, refId = maxVarID s}
@@ -156,21 +129,21 @@ varFind name (currNoad:ancestry) = do
     Nothing -> varFind name ancestry
     Just refvar -> do
       s <- get
-      let re = (varMap s) ! (Var (refId refvar) Real)
-          im = (varMap s) ! (Var (refId refvar) Imag)
-      return $ mkDep (re, im)
+      let r = (varMap s) ! (Var (refId refvar) Real)
+          i = (varMap s) ! (Var (refId refvar) Imag)
+      return $ mkDep (r, i)
 
 pathFind [name] np =
   varFind name np
 
 pathFind (n:names) npath@(currNoad:ancestry) =
-  let noadList = (putChildren currNoad) ++ (boxChildren currNoad) in
+  let noadList = children currNoad in
   case find (\nd -> name (defNode nd) == Just n) noadList of
     Nothing ->
       case ancestry of
         [] -> return $ mkConst 0.0
         parent:_ ->
-          let noadList = (putChildren parent) ++ (boxChildren parent) in
+          let noadList = children parent in
           case find (\nd -> name (defNode nd) == Just n) noadList of
             Nothing -> return $ mkConst 0.0
             Just noad ->
@@ -181,8 +154,8 @@ pathFind (n:names) npath@(currNoad:ancestry) =
 isKnown dp =
   isKnownComb (rePart dp) && isKnownComb (imPart dp)
 
-knownRe = getValue . rePart
-knownIm = getValue . imPart
+re = getValue . rePart
+im = getValue . imPart
 
 mkDep (re, im) =
   DepPair {
@@ -214,9 +187,9 @@ evalExpr expr noadTrail =
           x <- eval ex
           y <- eval ey
           let mult knownExpr x =
-                let (re, im) = (knownRe knownExpr, knownIm knownExpr)
-                in return $ mkDep (re |*| rePart x  |-| im |*| imPart x,
-                                   im |*| rePart x  |+| re |*| imPart x)
+                let (r, i) = (re knownExpr, im knownExpr)
+                in return $ mkDep (r |*| rePart x  |-| i |*| imPart x,
+                                   i |*| rePart x  |+| r |*| imPart x)
           case (isKnown x, isKnown y) of
             (True, _) -> mult x y
             (_, True) -> mult y x
@@ -228,14 +201,14 @@ evalExpr expr noadTrail =
           y <- eval ey
           if isKnown y
             then
-            let re = knownRe y
-                im = - (knownIm y)
-                modulus = re * re + im * im
+            let r = re y
+                i = - (im y)
+                modulus = r * r + i * i
             in
              if (modulus < epsilon * epsilon)
              then return $ mkConst 1.0 -- division by zero
-             else return $ mkDep ((re / modulus) |*| rePart x  |-|  (im / modulus) |*| imPart x,
-                                  (im / modulus) |*| rePart x  |+|  (re / modulus) |*| imPart x)
+             else return $ mkDep ((r / modulus) |*| rePart x  |-|  (i / modulus) |*| imPart x,
+                                  (i / modulus) |*| rePart x  |+|  (r / modulus) |*| imPart x)
             else do
               raiseNlFlag
               return $ mkConst 1.0
@@ -249,8 +222,8 @@ evalExpr expr noadTrail =
             "cis" -> do
               x <- eval (head exprs)
               if isKnown x
-                then return $ mkDep (mkConstComb (cos (dtor (knownRe x))),
-                                     mkConstComb (sin (dtor (knownRe x))))
+                then return $ mkDep (mkConstComb (cos (dtor (re x))),
+                                     mkConstComb (sin (dtor (re x))))
                 else
                 do
                   raiseNlFlag
@@ -258,7 +231,7 @@ evalExpr expr noadTrail =
             "abs" -> do
               x <- eval (head exprs)
               if isKnown x
-                then return $ mkConst $ sqrt $ (knownRe x)**2 + (knownIm x)**2
+                then return $ mkConst $ sqrt $ (re x)**2 + (im x)**2
                 else
                 do
                   raiseNlFlag
@@ -272,13 +245,12 @@ eqnEval figure noadTrail =
   let currNoad = head noadTrail
       BoxDef name stmts = box $ defNode currNoad
       paradigmBox = lookupBox figure name
-      eqnStmts = justEqnStmts stmts
-      paradigmEqnStmts = justEqnStmts (boxStmts paradigmBox)
+      eqnStmts = onlyEqnStmts stmts
+      paradigmEqnStmts = onlyEqnStmts (boxStmts paradigmBox)
   in do
     forM_ (eqnStmts ++ paradigmEqnStmts) trySolve
     --XXX: order?
-    forM_  (putChildren currNoad ++ boxChildren currNoad)
-      (\n -> eqnEval figure (n:noadTrail))
+    forM_ (children currNoad) (\n -> eqnEval figure (n:noadTrail))
     return ()
     where trySolve (EqnStmt e) = do
             rEqnEval e noadTrail
@@ -371,7 +343,6 @@ data Shape =
     x1 :: Float,
     y1 :: Float
     }
-  deriving Show
 
 type ShapeList = [Shape]
 
@@ -382,60 +353,62 @@ connStmtToLineList noadPath (ConnStmt exprs)  = do
           e1 <- evalExpr e' noadPath
           if isKnown e0 && isKnown e1 then
             return (Just (Line {
-                            x0 = knownRe e0,
-                            y0 = knownIm e0,
-                            x1 = knownRe e1,
-                            y1 = knownIm e1
+                            x0 = re e0,
+                            y0 = im e0,
+                            x1 = re e1,
+                            y1 = im e1
                             }))
             else
             return Nothing
 
 
-evalPenStmt figure noadpath (PenStmt (startExpr:endExpr:_) nExpr (BoxDef name stmts) xExpr yExpr) = do
-  s <- get
-  startE  <- evalExpr startExpr noadpath
-  endE <- evalExpr endExpr noadpath
-  nE <- evalExpr nExpr noadpath
-  let numSteps = round $ knownRe nE
-      (realStart, realEnd) = (knownRe startE, knownRe endE)
-      (imagStart, imagEnd) = (knownIm startE, knownIm endE)
-  -- XXX: wrong!
-      realStep = (realEnd - realStart) / (fromIntegral numSteps)
-      imagStep = (imagEnd - imagStart) / (fromIntegral numSteps)
-      realCoeffSeq = take numSteps [realStart, (realStart + realStep)..]
-      imagCoeffSeq = take numSteps [imagStart, (imagStart + imagStep)..]
-      putnodes = zipWith (\re im ->
-                           let xeq = equate xExpr (re, im)
-                               yeq = equate yExpr (re + realStep, im + imagStep)
-                           in
-                            PutNode {
-                              name = Nothing,
-                              box = (BoxDef name (stmts ++ [xeq, yeq]))
-                              })
-                 realCoeffSeq
-                 imagCoeffSeq
-  noads <- mapM (makeNoadTree figure) putnodes
-  _ <- mapM (\n -> eqnEval figure (n:noadpath)) noads
-  l <- mapM (\n -> collectShapes figure (n:noadpath)) noads
-  return (concat l)
-  where equate expr (re, im) =
+{-
+  conn a to b using n box {...} <x, y>;
+
+  is a shorthand for
+
+  for i = 1 to n
+     put box {
+       x = ((i-1)/n) [a, b];
+   y = (i/n) [a, b];
+   ...
+ };
+-}
+evalPenStmt :: Figure -> NoadPath -> Stmt -> State NoadState [Maybe Shape]
+evalPenStmt fig noadTrail (PenStmt (a:b:_) nExpr (BoxDef name stmts) x y) = do
+  nVal <- evalExpr nExpr noadTrail
+  if not $ isKnown nVal
+    then return []
+    else do
+    let n = re nVal
+        mkEqn var i =
           EqnStmt (EqnNode
-                   (EqnLeaf expr)
-                   (EqnLeaf (Comma (Const re) (Const im)))
-                   False )
+                   (EqnLeaf var)
+                   (EqnLeaf (Bracket (Div i (Const n)) a b))
+                   False)
+        xEqn i = mkEqn x (Sub (Const i) (Const 1.0))
+        yEqn i = mkEqn y (Const i)
+        mkPut i = PutNode {
+          name = Nothing,
+          box = BoxDef name (xEqn i:yEqn i:stmts)
+          }
+        newPuts = map mkPut [1.0 .. n]
+    noads <- mapM (makeNoadTree fig) newPuts
+    forM_ noads (\n -> eqnEval fig (n:noadTrail))
+    l <- mapM (\n -> collectShapes fig (n:noadTrail)) noads
+    return $ concat l
 
 
 collectShapes figure noadPath@(currNoad:ancestry) = do
   let BoxDef name stmts = box $ defNode currNoad
       paradigmBox = lookupBox figure name
       paradigmStmts = boxStmts paradigmBox
-      connStmts = (justConnStmts stmts) ++ (justConnStmts paradigmStmts)
-      putStmts = (justPenStmts stmts) ++ (justPenStmts paradigmStmts)
+      connStmts = onlyConnStmts $ stmts ++ paradigmStmts
+      penStmts = onlyPenStmts $ stmts ++ paradigmStmts
   x <- mapM (connStmtToLineList noadPath) connStmts
-  l <- mapM (\n -> collectShapes figure (n:noadPath)) (boxChildren currNoad)
-  l' <- mapM (\n -> collectShapes figure (n:noadPath)) (putChildren currNoad)
-  y <- mapM (evalPenStmt figure noadPath) putStmts
-  return $ concat (x ++ y ++ l ++ l')
+  l <- mapM (\n -> collectShapes figure (n:noadPath)) (children currNoad)
+  y <- mapM (evalPenStmt figure noadPath) penStmts
+  return $ concat (x ++ y ++ l)
 
 
 data Extent = Extent {
