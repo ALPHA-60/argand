@@ -15,7 +15,7 @@ type Statements = [Stmt]
 data Stmt =
   Stmt Int
   | VarStmt [VarName]
-  | EqnStmt EqnTree
+  | EqnStmt Eqn
   | PutStmt (Maybe Name) BoxDef
   | ConnStmt [Expr]
   | PenStmt [Expr] Expr BoxDef Expr Expr
@@ -27,9 +27,9 @@ data StrJust =
   | JustRight
   | JustCenter
 
-data EqnTree =
+data Eqn =
   EqnLeaf Expr
-  | EqnNode EqnTree EqnTree Bool
+  | EqnNode Eqn Eqn Bool
 
 data Expr = Const Float
           | Neg Expr
@@ -54,6 +54,21 @@ type CplxVarId = Int
 
 data Var = Var CplxVarId VarType
          deriving (Eq, Ord)
+
+data VarRef = VarRef{
+  refName :: Name,
+  refId :: Int
+}
+
+data PutNode = PutNode {
+  name :: Maybe Name,
+  box  :: BoxDef
+  }
+
+varNames (VarStmt v) = v
+
+putStmtToPutNode (PutStmt n b) = PutNode {name = n, box = b}
+
 
 epsilon :: Float
 epsilon = 0.0001

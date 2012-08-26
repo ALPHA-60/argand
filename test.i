@@ -1,5 +1,9 @@
 .IS
 
+box nlbox {
+        var nl1, nl2;
+}
+
 box null {
 }
 
@@ -53,6 +57,18 @@ box main {
                 conn c + r*cis(a1) to c + r*cis(a2);
 
         } <a1, a2>;
+        
+        put nlbox {
+                nl1 = nl2 * nl2;
+                nl2 = (2,1);
+                conn nl1 to nl2;
+        }
+
+        put nlbox {
+                nl1 = nl2 * nl2;
+                nl2 = (3,1);
+                conn nl1 to nl2;
+        }
 
 }
 
