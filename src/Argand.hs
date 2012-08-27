@@ -1,4 +1,5 @@
-module Argand where
+module Main where
+
 import Core
 
 import Control.Monad.State
