@@ -1,7 +1,5 @@
 module Core where
 
-type Figure = [BoxDef]
-
 type Number = Float
 
 data BoxDef =
@@ -9,6 +7,8 @@ data BoxDef =
     boxName :: String,
     boxStmts :: Statements
     }
+
+type Figure = [BoxDef]
 
 type Statements = [Stmt]
 
@@ -75,17 +75,17 @@ epsilon = 0.0001
 
 
 onlyVarStmts :: Statements -> Statements
-onlyVarStmts s = [x | x@(VarStmt _) <- s]
+onlyVarStmts s = [x | x@VarStmt {} <- s]
 
 onlyEqnStmts :: Statements -> Statements
-onlyEqnStmts s = [x | x@(EqnStmt _) <- s]
+onlyEqnStmts s = [x | x@EqnStmt {} <- s]
 
 onlyPutStmts :: Statements -> Statements
-onlyPutStmts s = [x | x@(PutStmt _ _) <- s]
+onlyPutStmts s = [x | x@PutStmt {} <- s]
 
 
 onlyPenStmts :: Statements -> Statements
-onlyPenStmts s = [x | x@(PenStmt _ _ _ _ _) <- s]
+onlyPenStmts s = [x | x@PenStmt {} <- s]
 
 onlyConnStmts :: Statements -> Statements
-onlyConnStmts s = [x | x@(ConnStmt _) <- s]
+onlyConnStmts s = [x | x@ConnStmt {} <- s]

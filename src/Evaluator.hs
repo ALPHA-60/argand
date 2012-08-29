@@ -8,19 +8,19 @@ import Data.Map (Map, empty, insert, (!))
 import Data.List (find)
 
 data Cplx = Cplx {
-  rePart :: LinComb,
-  imPart :: LinComb
+  re :: LinComb,
+  im :: LinComb
   }
 
 
-re = getValue . rePart
+knownRe = getValue . re
 
 
-im = getValue . imPart
+knownIm = getValue . im
 
 
 mkCplx :: (LinComb, LinComb) -> Cplx
-mkCplx (re, im) = Cplx {rePart = re, imPart = im}
+mkCplx (r, i) = Cplx {re = r, im = i}
 
 
 dtor x = x * (pi/ 180)
@@ -32,7 +32,7 @@ mkRealConst c = mkCplx (mkConstComb c, mkConstComb 0.0)
 
 isKnown :: Cplx -> Bool
 isKnown x =
-  isKnownComb (rePart x) && isKnownComb (imPart x)
+  isKnownComb (re x) && isKnownComb (im x)
 
 
 eval :: Expr -> ArgState Cplx
@@ -45,27 +45,27 @@ eval (Path p) = do
 
 eval (Neg e) = do
   e' <- eval e
-  return $ mkCplx ((-1) |*| rePart e', (-1) |*| imPart e')
+  return $ mkCplx ((-1) |*| re e', (-1) |*| im e')
 
 
 eval (Add ex ey) = do
   x <- eval ex
   y <- eval ey
-  return $ mkCplx (rePart x |+| rePart y, imPart x |+| imPart y)
+  return $ mkCplx (re x |+| re y, im x |+| im y)
 
 
 eval (Sub ex ey) = do
   x <- eval ex
   y <- eval ey
-  return $ mkCplx (rePart x |-| rePart y, imPart x |-| imPart y)
+  return $ mkCplx (re x |-| re y, im x |-| im y)
 
 eval (Mul ex ey) = do
   x <- eval ex
   y <- eval ey
   let mult knownExpr x =
-        let (r, i) = (re knownExpr, im knownExpr)
-        in return $ mkCplx (r |*| rePart x  |-| i |*| imPart x,
-                            i |*| rePart x  |+| r |*| imPart x)
+        let (r, i) = (knownRe knownExpr, knownIm knownExpr)
+        in return $ mkCplx (r |*| re x  |-| i |*| im x,
+                            i |*| re x  |+| r |*| im x)
   case (isKnown x, isKnown y) of
     (True, _) -> mult x y
     (_, True) -> mult y x
@@ -78,16 +78,16 @@ eval (Div ex ey) = do
   x <- eval ex
   y <- eval ey
   if isKnown y
-    then let r = re y
-             i = - (im y)
+    then let r = knownRe y
+             i = - (knownIm y)
              modulus = r * r + i * i
          in
           if (modulus < epsilon * epsilon)
           then return $ mkRealConst 1.0 -- division by zero
           else do
-            let re = (r / modulus) |*| rePart x |-| (i / modulus) |*| imPart x
-                im = (i / modulus) |*| rePart x |+| (r / modulus) |*| imPart x
-            return $ mkCplx (re, im)
+            let r' = (r / modulus) |*| re x |-| (i / modulus) |*| im x
+                i' = (i / modulus) |*| re x |+| (r / modulus) |*| im x
+            return $ mkCplx (r', i')
     else do
     raiseNlFlag
     return $ mkRealConst 1.0
@@ -99,7 +99,7 @@ eval (Bracket coeff start end) = eval (Add start (Mul coeff (Sub end start)))
 eval (Comma ex ey) = do
   x <- eval ex
   y <- eval ey
-  return $ mkCplx (rePart x, rePart y)
+  return $ mkCplx (re x, re y)
 
 
 eval (App f es) = evalFun f es
@@ -112,8 +112,8 @@ evalFun :: Name -> [Expr] -> ArgState Cplx
 evalFun "cis" (e:_) = do
   x <- eval e
   if isKnown x
-    then return $ mkCplx (mkConstComb (cos (dtor (re x))),
-                          mkConstComb (sin (dtor (re x))))
+    then return $ mkCplx (mkConstComb (cos (dtor (knownRe x))),
+                          mkConstComb (sin (dtor (knownRe x))))
     else do
     raiseNlFlag
     return $ mkRealConst 1.0
@@ -121,7 +121,7 @@ evalFun "cis" (e:_) = do
 evalFun "abs" (e:_) = do
   x <- eval e
   if isKnown x
-    then return $ mkRealConst $ sqrt $ (re x)**2 + (im x)**2
+    then return $ mkRealConst $ sqrt $ (knownRe x)**2 + (knownIm x)**2
     else do
     raiseNlFlag
     return $ mkRealConst 1.0
@@ -139,9 +139,8 @@ varFind name (currNoad:ancestry) = do
   case find (\vr -> refName vr == name) refVarList of
     Nothing -> varFind name ancestry
     Just refvar -> do
-      s <- get
-      let r = (varMap s) ! (Var (refId refvar) Real)
-          i = (varMap s) ! (Var (refId refvar) Imag)
+      r <- getVar (Var (refId refvar) Real)
+      i <- getVar (Var (refId refvar) Imag)
       return $ mkCplx (r, i)
 
 

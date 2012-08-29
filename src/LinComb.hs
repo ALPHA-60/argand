@@ -2,9 +2,7 @@
   Linear combinations are of the form "a*x + b*y + c + ...".
 -}
 
-module LinComb ((|+|), (|-|), (|*|), LinComb (..),
-                mkLinComb, isKnownComb, getValue,
-                mkConstComb, depSubst, maxTermVarAndCoeff) where
+module LinComb where
 
 import Core (Var, epsilon)
 import Data.Maybe (isJust, isNothing)
@@ -83,6 +81,5 @@ maxTermVarAndCoeff :: LinComb -> (Var, Float)
 maxTermVarAndCoeff x =
   let nonConsts = filter (isJust . varId) x
       LinTerm { varId = Just dv, coeff = c } = maximumBy compareCoeffs nonConsts
-  in
-  (dv, c)
+  in (dv, c)
   where compareCoeffs t1 t2 = compare (abs $ coeff t1) (abs $ coeff t2)

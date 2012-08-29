@@ -7,11 +7,12 @@ import LinComb
 import Noad
 import ArgState
 
+
 solveEquations = do
-  (currNoad, children, stmts, paradigmStmts) <- getCurrNoadInfo
-  let eqns = onlyEqnStmts $ stmts ++ paradigmStmts
+  (children, stmts) <- getCurrNoadInfo
+  let eqns = onlyEqnStmts stmts
   forM_ eqns tryEqn
-  forM_ children (\n -> doInside n solveEquations)
+  forM_ children (descendAnd solveEquations)
   where tryEqn (EqnStmt e) = do
           handleEqn e
           nl <- wasNonLinear
@@ -21,40 +22,40 @@ solveEquations = do
 
 
 handleEqn et =
-      case et of
-        EqnLeaf expr -> eval expr
-        EqnNode etl etr _ -> do
-          lhs <- handleEqn etl
-          rhs <- handleEqn etr
-          nl <- wasNonLinear
-          if nl
-            then return rhs
-            else do
-            [lhsRe, lhsIm, rhsRe, rhsIm] <- mapM substDepVarsInto
-                  [rePart lhs, imPart lhs, rePart rhs, imPart rhs]
-            eqnDo $ lhsRe |-| rhsRe
-            [lhsIm', rhsIm'] <- mapM substDepVarsInto [lhsIm, rhsIm]
-            {-
-             Wyk optimises for the fact that only one var might have
-             gotten into the list of dependent vars after first eqnDo:
-             case depVarList s of
-             [] -> return [il, ir]
-             newVarId:_ -> do
-               s <- get
-               let newVarDeps = (varMap s) ! newVarId
-               return $ map (depSubst newVarId newVarDeps) [il, ir]
-            -}
-            eqnDo $ lhsIm' |-| rhsIm'
+  case et of
+    EqnLeaf expr -> eval expr
+    EqnNode etl etr _ -> do
+      lhs <- handleEqn etl
+      rhs <- handleEqn etr
+      nl <- wasNonLinear
+      if nl
+        then return rhs
+        else do
+        [lhsRe, lhsIm, rhsRe, rhsIm] <- mapM substDepVarsInto
+              [re lhs, im lhs, re rhs, im rhs]
+        eqnDo $ lhsRe |-| rhsRe
+        [lhsIm', rhsIm'] <- mapM substDepVarsInto [lhsIm, rhsIm]
+        {-
+         Wyk optimises for the fact that only one var might have
+         gotten into the list of dependent vars after first eqnDo:
+         case depVarList s of
+         [] -> return [il, ir]
+         newVarId:_ -> do
+           s <- get
+           let newVarDeps = (varMap s) ! newVarId
+           return $ map (depSubst newVarId newVarDeps) [il, ir]
+        -}
+        eqnDo $ lhsIm' |-| rhsIm'
 -- XXX: fix this
-            return rhs
-      where substDepVarsInto linComb = do
-              depVars <- getDepVars
-              foldM
-                (\acc var -> do
-                             lc <- getVar var
-                             return $ depSubst var lc acc)
-                linComb
-                depVars
+        return rhs
+  where substDepVarsInto linComb = do
+          depVars <- getDepVars
+          foldM
+            (\acc var -> do
+                lc <- getVar var
+                return $ depSubst var lc acc)
+            linComb
+            depVars
 
 
 eqnDo linComb
@@ -73,22 +74,25 @@ eqnDo linComb
       setVar destVar (depSubst srcVar lc destComb)
 
 
-solveNonLinearEqns :: [(Eqn, NoadTrail)] -> [(Eqn, NoadTrail)] -> Bool
-                      -> ArgState ()
-solveNonLinearEqns toSolve failures haveNewData = do
-  case toSolve of
-    (eqn, ctx):rest -> do
-      resetNlFlag
-      setContext ctx
-      handleEqn eqn
-      nl <- wasNonLinear
-      if nl
-        then solveNonLinearEqns rest ((eqn, ctx): failures) haveNewData
-        else solveNonLinearEqns rest failures True
-    [] -> if haveNewData
-             then solveNonLinearEqns failures [] False
-             else do
-               mapM_ (\(eqn, ctx) -> do
-                             setContext ctx
-                             handleEqn eqn
-                         ) failures
+solveNonLinearEqns = do
+  nleqns <- getNlEqns
+  solveNls nleqns [] False
+  where
+  solveNls :: [NlEqn] -> [NlEqn] -> Bool -> ArgState ()
+  solveNls toSolve failures haveNewData = do
+    case toSolve of
+      nl:rest -> do
+        resetNlFlag
+        setContext (ctx nl)
+        handleEqn (eqn nl)
+        nonLin <- wasNonLinear
+        if nonLin
+          then solveNls rest (nl:failures) haveNewData
+          else solveNls rest failures True
+      [] -> if haveNewData
+            then solveNls failures [] False
+            else do
+              mapM_ (\nl -> do
+                        setContext (ctx nl)
+                        handleEqn (eqn nl)
+                    ) failures

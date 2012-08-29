@@ -22,20 +22,18 @@ data Shape =
     }
 
 
-type ShapeList = [Shape]
-
-
 connStmtToLineList (ConnStmt exprs)  = do
-  zipWithM makeLine exprs (tail exprs)
+  l <- zipWithM makeLine exprs (tail exprs)
+  return $ catMaybes l
   where makeLine e e' = do
           e0 <- eval e
           e1 <- eval e'
           if isKnown e0 && isKnown e1 then
             return (Just (Line {
-                            x0 = re e0,
-                            y0 = im e0,
-                            x1 = re e1,
-                            y1 = im e1
+                            x0 = knownRe e0,
+                            y0 = knownIm e0,
+                            x1 = knownRe e1,
+                            y1 = knownIm e1
                             }))
             else
             return Nothing
@@ -49,17 +47,17 @@ connStmtToLineList (ConnStmt exprs)  = do
   for i = 1 to n
      put box {
        x = ((i-1)/n) [a, b];
-   y = (i/n) [a, b];
-   ...
+       y = (i/n) [a, b];
+       ...
  };
 -}
-evalPenStmt :: Stmt -> ArgState [Maybe Shape]
+evalPenStmt :: Stmt -> ArgState [Shape]
 evalPenStmt (PenStmt (a:b:_) nExpr (BoxDef name stmts) x y) = do
   nVal <- eval nExpr
   if not $ isKnown nVal
     then return []
     else do
-    let n = re nVal
+    let n = knownRe nVal
         mkEqn var i =
           EqnStmt (EqnNode
                    (EqnLeaf var)
@@ -73,19 +71,19 @@ evalPenStmt (PenStmt (a:b:_) nExpr (BoxDef name stmts) x y) = do
           }
         newPuts = map mkPut [1.0 .. n]
     noads <- mapM makeNoadTree newPuts
-    forM_ noads (\n -> doInside n solveEquations)
-    l <- mapM (\n -> doInside n collectShapes) noads
+    forM_ noads (descendAnd solveEquations)
+    l <- mapM (descendAnd collectShapes) noads
     return $ concat l
 
 
 collectShapes  = do
-  (currNoad, children, stmts, paradigmStmts) <- getCurrNoadInfo
-  let connStmts = onlyConnStmts $ stmts ++ paradigmStmts
-      penStmts = onlyPenStmts $ stmts ++ paradigmStmts
-  x <- mapM connStmtToLineList connStmts
-  l <- mapM (\n -> doInside n collectShapes) children
-  y <- mapM evalPenStmt penStmts
-  return $ concat (x ++ y ++ l)
+  (children, stmts) <- getCurrNoadInfo
+  let connStmts = onlyConnStmts stmts
+      penStmts = onlyPenStmts stmts
+  s1 <- mapM connStmtToLineList connStmts
+  s2 <- mapM evalPenStmt penStmts
+  s3 <- mapM (descendAnd collectShapes) children
+  return $ concat (s1 ++ s2 ++ s3)
 
 
 data Extent = Extent {
@@ -115,17 +113,15 @@ process = do
   n <- makeNoadTree (PutNode (Just "main") (BoxDef "main" []))
   setContext [n]
   solveEquations
-  s <- get
-  solveNonLinearEqns (nlEqns s) [] False -- this destroys the context
-  setContext [n];
-  shps <- collectShapes;
-  return shps
+  solveNonLinearEqns -- this destroys the context
+  setContext [n]
+  collectShapes
 
 idMain figure = do
   let shapes = evalState process (initState figure)
   putStr "%!\n"
   putStr "/inch {72 mul} def\n"
-  psConv $ catMaybes shapes
+  psConv shapes
 
 psConv [] = do
   putStr "showpage\n"

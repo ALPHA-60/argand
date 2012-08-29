@@ -9,23 +9,29 @@ import Data.List (find)
 
 type ArgState a = State ArgM a
 
+
 data ArgM = ArgM {
   figure :: Figure,
   varMap :: Map Var LinComb,
   maxVarID :: Int,
   depVarList :: [Var],
   nlFail :: Bool,
-  nlEqns :: [(Eqn, NoadTrail)],
+  nlEqns :: [NlEqn],
   context :: NoadTrail
 }
 
+data NlEqn =
+  NlEqn {
+    eqn :: Eqn,
+    ctx :: NoadTrail
+    }
 
-getCurrNoadInfo :: ArgState (Noad, [Noad], Statements, Statements)
+getCurrNoadInfo :: ArgState ([Noad], Statements)
 getCurrNoadInfo = do
   currNoad <- getCurrNoad
   let BoxDef name stmts = box $ defNode currNoad
   paradigmBox <- lookupBox name
-  return (currNoad, children currNoad, stmts, boxStmts paradigmBox)
+  return (children currNoad, stmts ++ boxStmts paradigmBox)
 
 initState :: Figure -> ArgM
 initState figure =
@@ -39,8 +45,8 @@ initState figure =
     context = []
     }
 
-doInside :: Noad -> ArgState a -> ArgState a
-doInside n action = do
+descendAnd :: ArgState a -> Noad -> ArgState a
+descendAnd action n = do
   descend n
   res <- action
   ascend
@@ -61,7 +67,7 @@ wasNonLinear = do
 pushNonLinEqn :: Eqn -> ArgState ()
 pushNonLinEqn e = do
   s <- get
-  put s {nlEqns = (e, (context s)):(nlEqns s)}
+  put s {nlEqns = NlEqn{eqn = e, ctx = (context s)}:(nlEqns s)}
 
 
 getCurrNoad :: ArgState Noad
@@ -103,6 +109,10 @@ raiseNlFlag = do
   s <- get
   put s {nlFail = True}
 
+getNlEqns :: ArgState [NlEqn]
+getNlEqns = do
+  s <- get
+  return $ nlEqns s
 
 resetNlFlag :: ArgState ()
 resetNlFlag = do
