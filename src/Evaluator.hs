@@ -4,6 +4,7 @@ import Noad
 import ArgState
 import LinComb
 import Control.Monad.State
+import Control.Monad.Error
 import Data.Map (Map, empty, insert, (!))
 import Data.List (find)
 
@@ -14,7 +15,6 @@ data Cplx = Cplx {
 
 
 knownRe = getValue . re
-
 
 knownIm = getValue . im
 
@@ -35,7 +35,7 @@ isKnown x =
   isKnownComb (re x) && isKnownComb (im x)
 
 
-eval :: Expr -> ArgState Cplx
+eval :: Expr -> ErrorT ArgError (State PrgState) Cplx
 eval (Const c) = return $ mkRealConst c
 
 eval (Path p) = do
@@ -69,9 +69,7 @@ eval (Mul ex ey) = do
   case (isKnown x, isKnown y) of
     (True, _) -> mult x y
     (_, True) -> mult y x
-    (_, _ ) -> do
-      raiseNlFlag
-      return $ mkRealConst 1.0
+    (_, _ ) ->  throwError NonLinear
 
 
 eval (Div ex ey) = do
@@ -88,9 +86,7 @@ eval (Div ex ey) = do
             let r' = (r / modulus) |*| re x |-| (i / modulus) |*| im x
                 i' = (i / modulus) |*| re x |+| (r / modulus) |*| im x
             return $ mkCplx (r', i')
-    else do
-    raiseNlFlag
-    return $ mkRealConst 1.0
+    else throwError NonLinear
 
 
 eval (Bracket coeff start end) = eval (Add start (Mul coeff (Sub end start)))
@@ -108,29 +104,26 @@ eval (App f es) = evalFun f es
 eval _ = error "Don't know how to handle this expr"
 
 
-evalFun :: Name -> [Expr] -> ArgState Cplx
+evalFun :: Name -> [Expr] -> ErrorT ArgError (State PrgState) Cplx
 evalFun "cis" (e:_) = do
   x <- eval e
   if isKnown x
     then return $ mkCplx (mkConstComb (cos (dtor (knownRe x))),
                           mkConstComb (sin (dtor (knownRe x))))
-    else do
-    raiseNlFlag
-    return $ mkRealConst 1.0
+    else throwError NonLinear
 
 evalFun "abs" (e:_) = do
   x <- eval e
   if isKnown x
     then return $ mkRealConst $ sqrt $ (knownRe x)**2 + (knownIm x)**2
-    else do
-    raiseNlFlag
-    return $ mkRealConst 1.0
+    else throwError NonLinear
 
 evalFun _ _ = error "unknown function"
 
 
-varFind :: Name -> NoadTrail -> ArgState Cplx
+varFind :: Name -> NoadTrail -> ErrorT ArgError (State PrgState) Cplx
 varFind name [] =
+  -- TODO: warn or throw error
   return $ mkRealConst 0.0
 
 

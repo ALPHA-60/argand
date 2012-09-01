@@ -1,21 +1,21 @@
 module ArgState where
 
 import Control.Monad.State
+import Control.Monad.Error
 import Core
 import LinComb
 import Noad
 import Data.Map (Map, empty, insert, (!))
 import Data.List (find)
 
-type ArgState a = State ArgM a
+type ArgState a = State PrgState a
 
 
-data ArgM = ArgM {
+data PrgState = PrgState {
   figure :: Figure,
   varMap :: Map Var LinComb,
   maxVarID :: Int,
   depVarList :: [Var],
-  nlFail :: Bool,
   nlEqns :: [NlEqn],
   context :: NoadTrail
 }
@@ -26,6 +26,7 @@ data NlEqn =
     ctx :: NoadTrail
     }
 
+
 getCurrNoadInfo :: ArgState ([Noad], Statements)
 getCurrNoadInfo = do
   currNoad <- getCurrNoad
@@ -33,17 +34,18 @@ getCurrNoadInfo = do
   paradigmBox <- lookupBox name
   return (children currNoad, stmts ++ boxStmts paradigmBox)
 
-initState :: Figure -> ArgM
+
+initState :: Figure -> PrgState
 initState figure =
-  ArgM {
+  PrgState {
     figure = figure,
     varMap = empty,
     maxVarID = 1 ,
     depVarList = [],
-    nlFail = False,
     nlEqns = [],
     context = []
     }
+
 
 descendAnd :: ArgState a -> Noad -> ArgState a
 descendAnd action n = do
@@ -59,11 +61,6 @@ descendAnd action n = do
           put s {context  = tail $ context s }
 
 
-wasNonLinear :: ArgState Bool
-wasNonLinear = do
-  s <- get
-  return $ nlFail s
-
 pushNonLinEqn :: Eqn -> ArgState ()
 pushNonLinEqn e = do
   s <- get
@@ -75,6 +72,7 @@ getCurrNoad = do
   s <- get
   return $ head $ context s
 
+
 lookupBox :: Name -> ArgState BoxDef
 lookupBox name = do
   s <- get
@@ -83,51 +81,21 @@ lookupBox name = do
     Just box -> return box
 
 
-getVar :: Var -> ArgState LinComb
-getVar var = do
-  s <- get
-  return $ (varMap s) ! var
-
-getDepVars :: ArgState [Var]
-getDepVars = do
-  s <- get
-  return $ depVarList s
-
-pushDepVar :: Var -> ArgState ()
-pushDepVar var = do
-  s <- get
-  put s {depVarList = (var:(depVarList s))}
-
-setVar :: Var -> LinComb -> ArgState ()
-setVar var linComb = do
-  s <- get
-  put s {varMap = insert var linComb (varMap s) }
 
 
-raiseNlFlag :: ArgState ()
-raiseNlFlag = do
-  s <- get
-  put s {nlFail = True}
+
+
 
 getNlEqns :: ArgState [NlEqn]
 getNlEqns = do
   s <- get
   return $ nlEqns s
 
-resetNlFlag :: ArgState ()
-resetNlFlag = do
-  s <- get
-  put s {nlFail = False}
-
 setContext :: NoadTrail -> ArgState ()
 setContext trail = do
   s <- get
   put s { context = trail }
 
-getContext :: ArgState NoadTrail
-getContext = do
-  s <- get
-  return $ context s
 
 makeNoadTree :: PutNode -> ArgState Noad
 makeNoadTree putNode = do
@@ -163,3 +131,34 @@ makeNoadTree putNode = do
     incrCplxVarCount = do
       s <- get
       put s{maxVarID = maxVarID s + 1}
+
+-- lifted stateful functions for use in an error throwing monad
+getVar :: Var -> ErrorT ArgError (State PrgState) LinComb
+getVar = lift . getVar'
+          where getVar' var = do
+                  s <- get
+                  return $ (varMap s) ! var
+
+setVar :: Var -> LinComb -> ErrorT ArgError (State PrgState) ()
+setVar var lc = lift $ setVar' var lc
+  where setVar' var linComb = do
+          s <- get
+          put s {varMap = insert var linComb (varMap s) }
+
+getContext :: ErrorT ArgError (State PrgState) NoadTrail
+getContext = lift getContext'
+  where getContext' = do
+          s <- get
+          return $ context s
+
+getDepVars :: ErrorT ArgError (State PrgState) [Var]
+getDepVars = lift getDepVars'
+  where getDepVars' = do
+          s <- get
+          return $ depVarList s
+
+pushDepVar :: Var -> ErrorT ArgError (State PrgState) ()
+pushDepVar = lift . pushDepVar'
+  where pushDepVar' var = do
+          s <- get
+          put s {depVarList = (var:(depVarList s))}

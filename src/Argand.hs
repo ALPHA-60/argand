@@ -3,9 +3,11 @@ module Main where
 import Core
 
 import Control.Monad.State
+import Control.Monad.Error
 import Data.Maybe (catMaybes)
 import System.Environment (getArgs)
 import ArgState
+import LinComb
 import Evaluator
 import Solver
 import qualified Parser
@@ -21,22 +23,26 @@ data Shape =
     y1 :: Float
     }
 
+evaluate :: Expr -> ErrorT ArgError (State PrgState) Cplx
+evaluate e = do
+  result <- eval e
+  if isKnown result
+    then return result
+    else throwError UndeterminedVar
+
 
 connStmtToLineList (ConnStmt exprs)  = do
-  l <- zipWithM makeLine exprs (tail exprs)
-  return $ catMaybes l
+  lines <- zipWithM (\el er -> tryComputing $ makeLine el er) exprs (tail exprs)
+  return $ [line | Right line <- lines]
   where makeLine e e' = do
-          e0 <- eval e
-          e1 <- eval e'
-          if isKnown e0 && isKnown e1 then
-            return (Just (Line {
-                            x0 = knownRe e0,
-                            y0 = knownIm e0,
-                            x1 = knownRe e1,
-                            y1 = knownIm e1
-                            }))
-            else
-            return Nothing
+          e0 <- evaluate e
+          e1 <- evaluate e'
+          return (Line {
+              x0 = knownRe e0,
+              y0 = knownIm e0,
+              x1 = knownRe e1,
+              y1 = knownIm e1
+              })
 
 
 {-
@@ -53,27 +59,29 @@ connStmtToLineList (ConnStmt exprs)  = do
 -}
 evalPenStmt :: Stmt -> ArgState [Shape]
 evalPenStmt (PenStmt (a:b:_) nExpr (BoxDef name stmts) x y) = do
-  nVal <- eval nExpr
-  if not $ isKnown nVal
-    then return []
-    else do
-    let n = knownRe nVal
-        mkEqn var i =
-          EqnStmt (EqnNode
-                   (EqnLeaf var)
-                   (EqnLeaf (Bracket (Div i (Const n)) a b))
-                   False)
-        xEqn i = mkEqn x (Sub (Const i) (Const 1.0))
-        yEqn i = mkEqn y (Const i)
-        mkPut i = PutNode {
-          name = Nothing,
-          box = BoxDef name (xEqn i:yEqn i:stmts)
-          }
-        newPuts = map mkPut [1.0 .. n]
-    noads <- mapM makeNoadTree newPuts
-    forM_ noads (descendAnd solveEquations)
-    l <- mapM (descendAnd collectShapes) noads
-    return $ concat l
+  let getNewPutStmts = do
+        v <- evaluate nExpr
+        let n = knownRe v
+            mkEqn var i =
+              EqnStmt (EqnNode
+                       (EqnLeaf var)
+                       (EqnLeaf (Bracket (Div i (Const n)) a b))
+                       False)
+            xEqn i = mkEqn x (Sub (Const i) (Const 1.0))
+            yEqn i = mkEqn y (Const i)
+            mkPut i = PutNode {
+              name = Nothing,
+              box = BoxDef name (xEqn i:yEqn i:stmts)
+              }
+        return $ map mkPut [1.0 .. n]
+  newPutStmts <- tryComputing getNewPutStmts
+  case newPutStmts of
+    Left UndeterminedVar -> return []
+    Right newPuts -> do
+      noads <- mapM makeNoadTree newPuts
+      forM_ noads (descendAnd solveEquations)
+      l <- mapM (descendAnd collectShapes) noads
+      return $ concat l
 
 
 collectShapes  = do

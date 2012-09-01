@@ -1,4 +1,5 @@
 module Core where
+import Control.Monad.Error
 
 type Number = Float
 
@@ -64,6 +65,20 @@ data PutNode = PutNode {
   name :: Maybe Name,
   box  :: BoxDef
   }
+
+data ArgError = UndeterminedVar
+              | NonLinear
+              | MiscError String
+
+instance Show ArgError where
+  show UndeterminedVar = "undetermined variable"
+  show NonLinear = "nonlinear equation"
+  show (MiscError str) = str
+
+instance Error ArgError where
+  noMsg = MiscError "Unknown error"
+
+tryComputing = runErrorT
 
 varNames (VarStmt v) = v
 
