@@ -1,8 +1,10 @@
 module Solver (solveEquations, solveNonLinearEqns) where
 
 import Control.Monad.State
+import Control.Monad.Trans.Either (runEitherT)
+import Complex (scalar, Complex((:+:)))
 import Core
-import Evaluator
+import Evaluator (evaluate)
 import LinComb
 import Noad
 import ArgState
@@ -21,18 +23,23 @@ solveEquations = do
             else return ()
 
 
+handleEqn :: Eqn -> ArgState Complex
 handleEqn et =
   case et of
-    EqnLeaf expr -> eval expr
-    EqnNode etl etr _ -> do
-      lhs <- handleEqn etl
-      rhs <- handleEqn etr
+    EqnLeaf expr -> do
+      res <- evaluate expr
+      case res of
+        Right c -> return c
+        Left _ -> do { raiseNlFlag ; return (scalar 0.0) }
+    EqnNode x y _ -> do
+      xr :+: xi <- handleEqn x
+      yr :+: yi <- handleEqn y
       nl <- wasNonLinear
       if nl
-        then return rhs
+        then return (xr :+: xi)
         else do
         [lhsRe, lhsIm, rhsRe, rhsIm] <- mapM substDepVarsInto
-              [re lhs, im lhs, re rhs, im rhs]
+              [xr, xi, yr, yi]
         eqnDo $ lhsRe |-| rhsRe
         [lhsIm', rhsIm'] <- mapM substDepVarsInto [lhsIm, rhsIm]
         {-
@@ -47,7 +54,7 @@ handleEqn et =
         -}
         eqnDo $ lhsIm' |-| rhsIm'
 -- XXX: fix this
-        return rhs
+        return (yr :+: yi)
   where substDepVarsInto linComb = do
           depVars <- getDepVars
           foldM

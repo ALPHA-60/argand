@@ -129,6 +129,9 @@ getContext = do
   s <- get
   return $ context s
 
+getVarMap :: ArgState (Map Var LinComb)
+getVarMap = liftM varMap get
+
 makeNoadTree :: PutNode -> ArgState Noad
 makeNoadTree putNode = do
   let name = boxName $ box putNode
@@ -158,7 +161,7 @@ makeNoadTree putNode = do
     makeFreshVar varType = do
       s <- get
       let nextCplxVarId = maxVarID s
-      let newComb = mkLinComb (Var nextCplxVarId varType) 1.0
+      let newComb = [1.0 :*: Just (Var nextCplxVarId varType)]
       put s {varMap = insert (Var nextCplxVarId varType) newComb (varMap s) }
     incrCplxVarCount = do
       s <- get
